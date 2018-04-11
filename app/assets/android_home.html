@@ -1,0 +1,309 @@
+<html>
+    <head>
+      <title>Box2D/WebGL Demo</title>
+      <script src="./CubicVR.min.js" type="text/javascript"></script>
+      <script>
+        var Module = { TOTAL_MEMORY: 256*1024*1024 };
+      </script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/4.7.1/pixi.min.js"></script>
+      <script src="./Box2D_v2.2.1_min.js" type="text/javascript"></script>
+      <style type="text/css">
+        html { margin: 0; }
+        body { background-color: #ccc; 
+              margin: 0;}
+      </style>
+
+      <script type="text/javascript">
+
+      var world, NUM = 0, boxes, totalTime, app;
+      var bodies = []; 
+
+      var width, height;
+      var onGravity = false;
+
+      var APP_ICON_SIZE = 0.06;
+      const COL_NUM = 4;
+      const ROW_NUM = 4;
+
+    
+      
+      function onLoad(){
+        width = window.innerWidth; //600.0;
+        height = window.innerHeight;//800.0;
+        Box2D().then(startUp);
+
+      }
+
+      function startUp(Box2D) {
+        
+        var ZERO = new Box2D.b2Vec2(0.0, 0.0);
+        var temp = new Box2D.b2Vec2(0.0, 0.0);
+        
+
+        function initIconBody(id){
+          var body = bodies[id -1];
+          var initX = (id - 1) % COL_NUM / COL_NUM + 1 / COL_NUM / 2;
+          var initY = Math.floor((id - 1) / COL_NUM) / COL_NUM + 2.9 / COL_NUM ; 
+          temp.Set(initX, initY);
+          body.SetTransform(temp, 0.0);
+          body.SetLinearVelocity(ZERO);
+          body.SetAngularVelocity(0);
+          body.SetAwake(1);
+          body.SetActive(1);
+        }
+
+
+        function setupNativeInterface(){
+
+         
+          var size = APP_ICON_SIZE;
+          var shape = new Box2D.b2PolygonShape();
+          shape.SetAsBox(size, size);
+          
+          var createIcon = function(id, icon){
+            
+            console.log("createIcon: " + id);
+
+           
+
+            // simulate
+            function createIconBody(){
+              var bd = new Box2D.b2BodyDef();
+              bd.set_type(Box2D.b2_dynamicBody);
+              bd.set_position(ZERO);
+              bd.set_allowSleep(false);
+              var body = world.CreateBody(bd);
+              body.CreateFixture(shape, 0.1);
+              bodies.push(body);
+              initIconBody(id);
+            
+            }
+
+
+            // visual
+            function createIconBox(img){
+              var texture = PIXI.Texture.fromImage(img);
+              var box = new PIXI.Sprite(texture);
+              box.interactive = true;
+              // this button mode will mean the hand cursor appears when you roll over the bunny with your mouse
+              box.buttonMode = true;
+              // center the bunny's anchor point
+              box.anchor.set(0.5);
+              // make it a bit bigger, so it's easier to grab
+              box.scale.set(0.38);
+              // setup events for mouse + touch using
+              // the pointer events
+              box
+                  .on('pointerdown', onDragStart)
+                  .on('pointerup', onDragEnd)
+                  .on('pointerupoutside', onDragEnd)
+                  .on('pointermove', onDragMove);
+
+              box.x = 0;
+              box.y = 0;
+              box.id = id;
+
+              // add it to the stage
+              app.stage.addChild(box);
+              boxes.push(box);
+            }
+
+            const base64Head = "data:image/png;base64,";
+            if(
+              !/\.jpg$|\.png$/.test(icon.toLowerCase())
+                &&
+              icon.search(base64Head) == -1){
+              icon = "data:image/png;base64," + icon;
+            }
+            createIconBody();
+            createIconBox(icon);  
+            NUM++;
+            
+          };
+
+          if(!window.nativeInterface){
+            console.warn("nativeInterface is null");
+            for(var i = 0; i<16; i++){
+              createIcon(i+1, "cube1.jpg");
+            }
+            return;
+          }
+
+          nativeInterface.createIcon = createIcon;
+        }
+
+        function readObject(i, data) {
+          var body = bodies[i];
+          var bpos = body.GetPosition();
+          data.x = bpos.get_x();
+          data.y = bpos.get_y();
+          data.angle = body.GetAngle();
+        }
+
+        function simulate(dt) {
+          world.Step(dt, 2, 2);
+          var data = { x: 0, y: 0, angle: 0 };
+          // Read box2d data into JS objects
+          for (var i = 0; i < NUM; i++) {
+            readObject(i, data);
+            var renderObject = boxes[i];
+            renderObject.x = data.x * width;
+            renderObject.y = data.y *width;
+            renderObject.rotation = data.angle;//data.angle*180/Math.PI;
+          }
+          totalTime += dt;
+        }
+
+       
+
+        function onDragStart(event) {
+          // store a reference to the data
+          // the reason for this is because of multitouch
+          // we want to track the movement of this particular touch
+          this.data = event.data;
+          this.alpha = 0.5;
+          this.dragging = true;
+          this.isMove = false;
+        }
+
+        function onDragEnd() {
+          this.alpha = 1;
+          this.dragging = false;
+          // set the interaction data to null
+          this.data = null;
+
+          if(!this.isMove){
+
+            console.log("click" + this.id);
+            if(this.id){
+              nativeInterface.launchApp(this.id);
+            }
+          }
+          
+          this.isMove = false;
+
+        }
+
+        function onDragMove() {
+          if (this.dragging) {
+            var newPosition = this.data.getLocalPosition(this.parent);
+            this.x = newPosition.x;
+            this.y = newPosition.y;
+            this.isMove = true;
+          }
+        }
+
+
+        const G_THRESHOLD = 0.5;
+
+        function handleOrientation(event) {
+          var x = event.beta;  // -180 から 180 の範囲で角度を示す
+          var y = event.gamma; // -90 から 90 の範囲で角度を示す
+
+          // デバイスをひっくり返したくはないため、
+          // x の値を -90 から 90 の範囲に制限する
+          if (x >  90) { x =  90};
+          if (x < -90) { x = -90};
+
+          const G_COEFF = 2.0;
+
+          var gx = y / 90 * G_COEFF;
+          var gy = x / 90 * G_COEFF;
+
+          if(!onGravity && gx * gx + gy*gy < G_THRESHOLD){
+            return;
+          }
+          onGravity = true;
+          var gravity = new Box2D.b2Vec2(gx, gy);
+          world.SetGravity(gravity);
+
+        }
+
+      
+
+        function createFloor(){
+           // 壁
+          var shape1 = new Box2D.b2EdgeShape();
+          shape1.Set(new Box2D.b2Vec2(0.0, 0.0), new Box2D.b2Vec2(0, screenAspect));
+          ground.CreateFixture(shape1, 0.0);
+
+          var shape2 = new Box2D.b2EdgeShape();
+          shape2.Set(new Box2D.b2Vec2(1.0, 0.0), new Box2D.b2Vec2(1.0, screenAspect));
+          ground.CreateFixture(shape2, 0.0);
+
+           var shape3 = new Box2D.b2EdgeShape();
+          shape3.Set(new Box2D.b2Vec2(0.0, 0.0), new Box2D.b2Vec2(1.0, 0.0));
+          ground.CreateFixture(shape3, 0.0);
+        }
+
+        function reset(){
+          onGravity = false;
+          for(i=0; i<NUM; i++){
+            initIconBody(i+1);
+          }
+          var gravity = new Box2D.b2Vec2(0.0, 0.0);
+          world.SetGravity(gravity);
+
+        }
+
+
+        var screenAspect = height / width;
+        var NUMRANGE = [];
+        while (NUMRANGE.length < NUM) NUMRANGE.push(NUMRANGE.length+1);
+        
+        // Box2D-interfacing code
+        var gravity = new Box2D.b2Vec2(0.0, 0.0);
+        world = new Box2D.b2World(gravity);
+        
+        var bd_ground = new Box2D.b2BodyDef();
+        var ground = world.CreateBody(bd_ground);
+        var shape0 = new Box2D.b2EdgeShape();
+        shape0.Set(new Box2D.b2Vec2(0.0, screenAspect), new Box2D.b2Vec2(1.0, screenAspect));
+        ground.CreateFixture(shape0, 0.0);
+
+        createFloor(); 
+       
+        // Main demo code
+        totalTime = 0;
+        boxes = [];
+      
+       
+        app = new PIXI.Application(width, height, {backgroundColor : 0x000000});
+        var container = document.getElementById("d2-container");
+        container.appendChild(app.view);
+
+        // background
+        var background = PIXI.Sprite.fromImage('background.png');
+        //background.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST;
+
+      
+        background.width = width;
+        background.height = height;
+
+        background.interactive = true;
+
+        background.on("pointerup", function(e){
+          console.log(e.data.global);
+          reset();
+        });
+
+        app.stage.addChild( background );
+
+
+        setupNativeInterface(Box2D);
+
+
+        app.ticker.add(function(delta){
+          delta = delta / 60.0; // max 60fps
+          simulate(delta);
+        });
+
+        window.addEventListener('deviceorientation', handleOrientation);
+
+      }
+      </script>
+    </head>
+    <body onload="onLoad()">
+        <div id="d2-container"></div>
+    </body>
+</html>
